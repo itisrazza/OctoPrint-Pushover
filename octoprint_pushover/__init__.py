@@ -1,19 +1,23 @@
-# coding=utf-8
+"""
+Module entry point for Pushover notifications.
+"""
+
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
-import flask
 import json
+from io import BytesIO
+import datetime
+
+import octoprint.util
 import octoprint.plugin
-import octoprint.plugin
+from octoprint.util import RepeatedTimer
+
+import flask
+from flask_login import current_user
 import requests
 from requests.exceptions import HTTPError
-import datetime
-import octoprint.util
-from io import StringIO, BytesIO
 from PIL import Image
-from flask_login import current_user
-from octoprint.util import RepeatedTimer
 
 __author__ = "Thijs Bekke <thijsbekke@gmail.com>, Raresh Nistor <raresh@nistor.email>"
 __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agpl.html"
@@ -22,7 +26,7 @@ __plugin_name__ = "Pushover"
 __plugin_pythoncompat__ = ">=2.7,<4"
 
 
-class PushoverPlugin(
+class PushoverPlugin(  # pylint: disable=too-many-ancestors
     octoprint.plugin.EventHandlerPlugin,
     octoprint.plugin.SettingsPlugin,
     octoprint.plugin.StartupPlugin,
@@ -32,6 +36,10 @@ class PushoverPlugin(
     octoprint.plugin.ProgressPlugin,
     octoprint.plugin.OctoPrintPlugin,
 ):
+    """
+    Plugin information.
+    """
+
     api_url = "https://api.pushover.net/1"
     m70_cmd = ""
     printing = False
@@ -56,16 +64,11 @@ class PushoverPlugin(
         "waving_hand_sign": "\U0001f44b",
     }
 
-    def get_emoji(self, key):
-        if key in self.emoji:
-            return self.emoji[key]
-        return ""
-
     def get_assets(self):
         return {"js": ["js/pushover.js"]}
 
     def get_api_commands(self):
-        return dict(test=["api_key", "user_key"])
+        return {"test": ["api_key", "user_key"]}
 
     def on_api_command(self, command, data):
         if command == "test":
@@ -76,7 +79,7 @@ class PushoverPlugin(
             # When we are testing the token, create a test notification
             payload = {
                 "message": "".join(
-                    ["pewpewpew!! OctoPrint works. ", self.get_emoji("rocket")]
+                    ["pewpewpew!! OctoPrint works. ", self.emoji.get("rocket", "")]
                 ),
                 "token": data["api_key"],
                 "user": data["user_key"],
@@ -93,9 +96,9 @@ class PushoverPlugin(
             try:
                 self.validate_pushover(data["api_key"], data["user_key"])
                 self.event_message(payload)
-                return flask.jsonify(dict(success=True))
+                return flask.jsonify({"success": True})
             except Exception as e:
-                return flask.jsonify(dict(success=False, msg=str(e.message)))
+                return flask.jsonify({"success": False, "msg": e.message})
         return flask.make_response("Unknown command", 400)
 
     def validate_pushover(self, api_key, user_key):
@@ -120,7 +123,7 @@ class PushoverPlugin(
 
             if r is not None and not r.status_code == 200:
                 raise ValueError(
-                    "error while instantiating Pushover, header %s" % r.status_code
+                    f"error while instantiating Pushover, header {r.status_code}"
                 )
 
             response = json.loads(r.content)
@@ -131,7 +134,7 @@ class PushoverPlugin(
                 return True
 
         except Exception as e:
-            raise ValueError("error while instantiating Pushover: %s" % str(e))
+            raise ValueError(f"error while instantiating Pushover: {e}") from e
 
         return False
 
@@ -145,17 +148,15 @@ class PushoverPlugin(
         if not snapshot_url:
             return None
 
-        self._logger.debug("Snapshot URL: %s " % str(snapshot_url))
+        self._logger.debug(f"Snapshot URL: {snapshot_url}")
         try:
             image = requests.get(snapshot_url, stream=True).content
         except HTTPError as http_err:
             self._logger.info(
-                "HTTP error occured while trying to get image: %s " % str(http_err)
+                f"HTTP error occured while trying to get image: {http_err}"
             )
         except Exception as err:
-            self._logger.info(
-                "Other error occurred while trying to get image: %s " % str(err)
-            )
+            self._logger.info(f"Other error occurred while trying to get image: {err}")
 
         hflip = self._settings.global_get(["webcam", "flipH"])
         vflip = self._settings.global_get(["webcam", "flipV"])
@@ -178,7 +179,6 @@ class PushoverPlugin(
         return image
 
     def restart_timer(self):
-
         if self.timer:
             self.timer.cancel()
             self.timer = None
@@ -318,7 +318,9 @@ class PushoverPlugin(
 
     def PrintDone(self, payload):
         """
-        When the print is done, enhance the payload with the filename and the elased time and returns it
+        When the print is done, enhance the payload with the filename and the elased time and
+        returns it
+
         :param payload:
         :return:
         """
@@ -421,7 +423,8 @@ class PushoverPlugin(
         if not self.first_layer:
             return
 
-        # It is not actually the first layer, it was not my plan too create a lot of code for this feature
+        # It is not actually the first layer, it was not my plan too create a lot of code for this
+        # feature
         if payload["new"] < 2 or payload["old"] is None:
             return
 
@@ -574,7 +577,8 @@ class PushoverPlugin(
 
     def on_settings_migrate(self, target, current=None):
         if current is None:
-            # If you have the default token, remove it so users will be more triggered to obtain their own.
+            # If you have the default token, remove it so users will be more triggered to obtain
+            # their own.
             if self._settings.get(["token"]) == self._settings.get(["default_token"]):
                 self._settings.set(["token"], None)
 
@@ -605,7 +609,8 @@ class PushoverPlugin(
     def on_settings_load(self):
         data = octoprint.plugin.SettingsPlugin.on_settings_load(self)
 
-        # only return our restricted settings to admin users - this is only needed for OctoPrint <= 1.2.16
+        # only return our restricted settings to admin users
+        # this is only needed for OctoPrint <= 1.2.16
         restricted = ("default_token", "token", "user_key")
         for r in restricted:
             if r in data and (
@@ -619,7 +624,7 @@ class PushoverPlugin(
 
     def get_settings_restricted_paths(self):
         # only used in OctoPrint versions > 1.2.16
-        return dict(admin=[["default_token"], ["token"], ["user_key"]])
+        return {"admin": ["default_token", "token", "user_key"]}
 
     def has_own_token(self):
         return self.get_token() != self._settings.get(["default_token"])
@@ -631,139 +636,150 @@ class PushoverPlugin(
         return self._settings.get(["token"])
 
     def get_settings_defaults(self):
-        return dict(
-            default_token="apWqpdodabxA5Uw11rY4g4gC1Vbbrs",
-            token=None,
-            user_key=None,
-            sound=None,
-            device=None,
-            image=True,
-            events=dict(
-                Scheduled=dict(
-                    message="".join(
+        return {
+            "default_token": "apWqpdodabxA5Uw11rY4g4gC1Vbbrs",
+            "token": None,
+            "user_key": None,
+            "sound": None,
+            "device": None,
+            "image": None,
+            "events": {
+                "Scheduled": {
+                    "message": "".join(
                         [
                             "Scheduled Notification: {elapsed_time} Minutes Elapsed",
-                            self.get_emoji("clock"),
+                            self.emoji.get("clock", ""),
                         ]
                     ),
-                    priority="0",
-                    token_required=True,
-                    custom=True,
-                    mod=0,
-                ),
-                Progress=dict(
-                    message="Print Progress: {percentage}%",
-                    priority="0",
-                    token_required=True,
-                    custom=True,
-                    mod=0,
-                ),
-                TempReached=dict(
-                    name="Temperature Reached",
-                    message="".join(
+                    "priority": "0",
+                    "token_required": True,
+                    "custom": True,
+                    "mod": 0,
+                },
+                "Progress": {
+                    "message": "Print Progress: {percentage}%",
+                    "priority": "0",
+                    "token_required": True,
+                    "custom": True,
+                    "mod": 0,
+                },
+                "TempReached": {
+                    "name": "Temperature Reached",
+                    "message": "".join(
                         [
-                            self.get_emoji("temp"),
-                            "Temperature Reached! Bed: {bed_temp}/{bed_target} | Extruder: {e1_temp}/{e1_target}",
+                            self.emoji.get("temp", ""),
+                            " | ".join(
+                                [
+                                    "Temperature Reached! Bed: {bed_temp}/{bed_target}",
+                                    "Extruder: {e1_temp}/{e1_target}",
+                                ]
+                            ),
                         ]
                     ),
-                    priority="0",
-                    token_required=True,
-                ),
-                Shutdown=dict(
-                    name="Printer Shutdown",
-                    message="".join(
+                    "priority": "0",
+                    "token_required": True,
+                },
+                "Shutdown": {
+                    "name": "Printer Shutdown",
+                    "message": "".join(
                         [
                             "Bye bye, I am shutting down ",
-                            self.get_emoji("waving_hand_sign"),
+                            self.emoji.get("waving_hand_sign", ""),
                         ]
                     ),
-                    priority="0",
-                    token_required=True,
-                ),
-                Startup=dict(
-                    name="Printer Startup",
-                    message="".join(
+                    "priority": "0",
+                    "token_required": True,
+                },
+                "Startup": {
+                    "name": "Printer Startup",
+                    "message": "".join(
                         [
                             "Hello, Let's print something nice today ",
-                            self.get_emoji("waving_hand_sign"),
+                            self.emoji.get("waving_hand_sign", ""),
                         ]
                     ),
-                    token_required=True,
-                ),
-                PrintStarted=dict(
-                    name="Print Started",
-                    message="Print Job Started",
-                    priority="0",
-                    token_required=True,
-                ),
-                PrintDone=dict(
-                    name="Print Done",
-                    message="Print Job Finished: {file}, Finished Printing in {elapsed_time}",
-                    priority="0",
-                ),
-                PrintFailed=dict(
-                    name="Print Failed", message="Print Job Failed: {file}", priority=0
-                ),
-                PrintPaused=dict(
-                    name="Print Paused",
-                    help="Send a notification when a Pause event is received. When a <code>m70</code> was sent "
-                    "to the printer, the message will be appended to the notification.",
-                    message="Print Job Paused {m70_cmd}",
-                    priority=0,
-                ),
-                Waiting=dict(
-                    name="Printer is Waiting",
-                    help="Send a notification when a Waiting event is received. When a <code>m70</code> was sent "
-                    "to the printer, the message will be appended to the notification.",
-                    message="Printer is Waiting {m70_cmd}",
-                    priority=0,
-                ),
-                FilamentChange=dict(
-                    name="Filament Change",
-                    help="Send a notification when a M600 (Filament Change) command is received. When a <code>m70</code> was sent "
-                    "to the printer, the message will be appended to the notification.",
-                    message="Please change the filament {m70_cmd}",
-                    priority=0,
-                ),
-                ZChange=dict(
-                    name="After first couple of layer",
-                    help="Send a notification when the 'first' couple of layers is done.",
-                    message="".join(
+                    "token_required": True,
+                },
+                "PrintStarted": {
+                    "name": "Print Started",
+                    "message": "Print Job Started",
+                    "priority": "0",
+                    "token_required": True,
+                },
+                "PrintDone": {
+                    "name": "Print Done",
+                    "message": "Print Job Finished: {file}, Finished Printing in {elapsed_time}",
+                    "priority": "0",
+                },
+                "PrintFailed": {
+                    "name": "Print Failed",
+                    "message": "Print Job Failed: {file}",
+                    "priority": 0,
+                },
+                "PrintPaused": {
+                    "name": "Print Paused",
+                    "help": "Send a notification when a Pause event is received. When a "
+                    "<code>m70</code> was sent to the printer, "
+                    "the message will be appended to the notification.",
+                    "message": "Print Job Paused {m70_cmd}",
+                    "priority": 0,
+                },
+                "Waiting": {
+                    "name": "Printer is Waiting",
+                    "help": "Send a notification when a Waiting event is received. When a "
+                    "<code>m70</code> was sent to the printer, "
+                    "the message will be appended to the notification.",
+                    "message": "Printer is Waiting {m70_cmd}",
+                    "priority": 0,
+                },
+                "FilamentChange": {
+                    "name": "Filament Change",
+                    "help": "Send a notification when a M600 (Filament Change) command is received. "
+                    "When a <code>m70</code> was sent to the printer, "
+                    "the message will be appended to the notification.",
+                    "message": "Please change the filament {m70_cmd}",
+                    "priority": 0,
+                },
+                "ZChange": {
+                    "name": "After first couple of layer",
+                    "help": "Send a notification when the 'first' couple of layers is done.",
+                    "message": "".join(
                         [
                             "First couple of layers are done ",
-                            self.get_emoji("four_leaf_clover"),
+                            self.emoji.get("four_leaf_clover", ""),
                         ]
                     ),
-                    priority=0,
-                    token_required=True,
-                ),
-                Alert=dict(
-                    name="Alert Event (M300)",
-                    message="Alert! The printer issued a alert (beep) via M300",
-                    priority=1,
-                    hidden=True,
-                ),
-                EStop=dict(
-                    name="Panic Event (M112)",
-                    message="Panic!! The printer issued a panic stop (M112)",
-                    priority=1,
-                    hidden=True,
-                ),
+                    "priority": 0,
+                    "token_required": True,
+                },
+                "Alert": {
+                    "name": "Alert Event (M300)",
+                    "message": "Alert! The printer issued a alert (beep) via M300",
+                    "priority": 1,
+                    "hidden": True,
+                },
+                "EStop": {
+                    "name": "Panic Event (M112)",
+                    "message": "Panic!! The printer issued a panic stop (M112)",
+                    "priority": 1,
+                    "hidden": True,
+                },
                 # See: src/octoprint/util/comm.py:2009
-                Error=dict(
-                    name="Error Event",
-                    help="This event occurs when for example your temperature sensor disconnects.",
-                    message="Error!! An error has occurred in the printer communication. {error}",
-                    priority=1,
-                    hidden=True,
-                ),
-            ),
-        )
+                "Error": {
+                    "name": "Error Event",
+                    "help": "This event occurs when for example your temperature sensor disconnects.",
+                    "message": "Error!! An error has occurred in the printer communication. {error}",
+                    "priority": 1,
+                    "hidden": True,
+                },
+            },
+        }
 
     def get_template_vars(self):
-        return dict(
-            sounds=self.get_sounds(), events=self.get_settings_defaults()["events"]
-        )
+        return {
+            "sounds": self.get_sounds(),
+            "events": self.get_settings_defaults()["events"],
+        }
 
     def get_sounds(self):
         try:
@@ -774,28 +790,28 @@ class PushoverPlugin(
             return {}
 
     def get_template_configs(self):
-        return [dict(type="settings", name="Pushover", custom_bindings=True)]
+        return [{"type": "settings", "name": "Pushover", "custom_bindings": True}]
 
     def get_update_information(self):
-        return dict(
-            pushover=dict(
-                displayName="Pushover Plugin",
-                displayVersion=self._plugin_version,
-                # version check: github repository
-                type="github_release",
-                user="thijsbekke",
-                repo="OctoPrint-Pushover",
-                current=self._plugin_version,
-                # update method: pip
-                pip="https://github.com/thijsbekke/OctoPrint-Pushover/archive/{target_version}.zip",
-            )
-        )
+        return {
+            "pushover": {
+                "displayName": "Pushover Plugin",
+                "displayVersion": self._plugin_version,
+                "type": "github_release",
+                "user": "thijsbekke",
+                "repo": "OctoPrint-Pushover",
+                "current": self._plugin_version,
+                "pip": "https://github.com/thijsbekke/OctoPrint-Pushover/archive/{target_version}.zip",
+            }
+        }
 
 
 __plugin_name__ = "Pushover"
 
 
 def __plugin_load__():
+    # pylint: disable=line-too-long, global-variable-undefined
+
     global __plugin_implementation__
     __plugin_implementation__ = PushoverPlugin()
 
