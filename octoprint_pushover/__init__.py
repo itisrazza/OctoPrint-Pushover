@@ -15,7 +15,7 @@ from PIL import Image
 from flask_login import current_user
 from octoprint.util import RepeatedTimer
 
-__author__ = "Thijs Bekke <thijsbekke@gmail.com>"
+__author__ = "Thijs Bekke <thijsbekke@gmail.com>, Raresh Nistor <raresh@nistor.email>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
 __copyright__ = "Released under terms of the AGPLv3 License"
 __plugin_name__ = "Pushover"
