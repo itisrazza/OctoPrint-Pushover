@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 .idea
 
-
 # C extensions
 *.so
 
@@ -62,3 +61,6 @@ target/
 
 #Ipython Notebook
 .ipynb_checkpoints
+
+# Virtual Environment
+venv/
