@@ -69,68 +69,85 @@ plugin_readme_file = "README.md"
 from setuptools import setup
 
 try:
-	import octoprint_setuptools
+    import octoprint_setuptools
 except:
-	print("Could not import OctoPrint's setuptools, are you sure you are running that under "
-	      "the same python installation that OctoPrint is installed under?")
-	import sys
-	sys.exit(-1)
+    print(
+        "Could not import OctoPrint's setuptools, are you sure you are running that under "
+        "the same python installation that OctoPrint is installed under?"
+    )
+    import sys
+
+    sys.exit(-1)
 
 setup_parameters = octoprint_setuptools.create_plugin_setup_parameters(
-	identifier=plugin_identifier,
-	package=plugin_package,
-	name=plugin_name,
-	version=plugin_version,
-	description=plugin_description,
-	author=plugin_author,
-	mail=plugin_author_email,
-	url=plugin_url,
-	license=plugin_license,
-	requires=plugin_requires,
-	additional_packages=plugin_addtional_packages,
-	ignored_packages=plugin_ignored_packages,
-	additional_data=plugin_additional_data
+    identifier=plugin_identifier,
+    package=plugin_package,
+    name=plugin_name,
+    version=plugin_version,
+    description=plugin_description,
+    author=plugin_author,
+    mail=plugin_author_email,
+    url=plugin_url,
+    license=plugin_license,
+    requires=plugin_requires,
+    additional_packages=plugin_addtional_packages,
+    ignored_packages=plugin_ignored_packages,
+    additional_data=plugin_additional_data,
 )
 
 if len(additional_setup_parameters):
-	from octoprint.util import dict_merge
-	setup_parameters = dict_merge(setup_parameters, additional_setup_parameters)
+    from octoprint.util import dict_merge
+
+    setup_parameters = dict_merge(setup_parameters, additional_setup_parameters)
 
 if plugin_readme_file:
-	import os
+    import os
 
-	here = os.path.abspath(os.path.dirname(__file__))
-	plugin_readme_file_path = os.path.join(here, plugin_readme_file)
+    here = os.path.abspath(os.path.dirname(__file__))
+    plugin_readme_file_path = os.path.join(here, plugin_readme_file)
 
-	# make sure the file exists
-	if os.path.isfile(plugin_readme_file_path):
-		import codecs
+    # make sure the file exists
+    if os.path.isfile(plugin_readme_file_path):
+        import codecs
 
-		try:
-			with codecs.open(plugin_readme_file_path, "rb", "utf-8") as f:
-				plugin_readme_file_content = f.read()
+        try:
+            with codecs.open(plugin_readme_file_path, "rb", "utf-8") as f:
+                plugin_readme_file_content = f.read()
 
-		except Exception as e:
-			print("Error reading {} ({}), ignoring long description...".format(plugin_readme_file_path, str(e)))
+        except Exception as e:
+            print(
+                "Error reading {} ({}), ignoring long description...".format(
+                    plugin_readme_file_path, str(e)
+                )
+            )
 
-		else:
-			# file exists, let's see if it's markdown or not
-			if plugin_readme_file.endswith(".md"):
-				print("File with long description apparently is in Markdown format, will convert to RST with pypandoc")
-				try:
-					import pypandoc
-					setup_requires = setup_parameters.get("setup_requires", [])
-					setup_parameters.update(dict(
-						setup_requires=setup_requires+["setuptools-markdown"],
-						long_description_markdown_filename=plugin_readme_file
-					))
-				except:
-					print("No pypandoc installed, not using Markdown file as long description")
-					pass
-			else:
-				print("Using long description from {}...".format(plugin_readme_file_path))
-				setup_parameters.update(dict(
-					long_description=plugin_readme_file_content
-				))
+        else:
+            # file exists, let's see if it's markdown or not
+            if plugin_readme_file.endswith(".md"):
+                print(
+                    "File with long description apparently is in Markdown format, will convert to RST with pypandoc"
+                )
+                try:
+                    import pypandoc
+
+                    setup_requires = setup_parameters.get("setup_requires", [])
+                    setup_parameters.update(
+                        dict(
+                            setup_requires=setup_requires + ["setuptools-markdown"],
+                            long_description_markdown_filename=plugin_readme_file,
+                        )
+                    )
+                except:
+                    print(
+                        "No pypandoc installed, not using Markdown file as long description"
+                    )
+                    pass
+            else:
+                print(
+                    "Using long description from {}...".format(plugin_readme_file_path)
+                )
+                setup_parameters.update(
+                    dict(long_description=plugin_readme_file_content)
+                )
 
 setup(**setup_parameters)
