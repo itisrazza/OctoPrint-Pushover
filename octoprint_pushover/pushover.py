@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from enum import IntEnum
 
-from requests import RequestException, post, Response
+from requests import RequestException, get, post, Response
 from requests.exceptions import JSONDecodeError
 
 
@@ -218,6 +218,23 @@ class Pushover:
         except (JSONDecodeError, KeyError) as e:
             raise PushoverError.parse_fail(response) from e
 
+    def get_sounds(self) -> dict[str, str]:
+        """
+        Return a list of sounds available to this application.
+        """
+
+        try:
+            response = get(f"{self.BASE_URL}/sounds.json", { "token", self.token }, timeout=self.timeout)
+        except RequestException as e:
+            raise PushoverError.request_fail() from e
+
+        if response.status_code != 200:
+            raise PushoverError.status_code(response)
+
+        try:
+            return response.json()["sounds"]
+        except (JSONDecodeError, KeyError) as e:
+            raise PushoverError.parse_fail(response) from e
 
     def _request_body(self, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         data = dict(data) if data is not None else {}
