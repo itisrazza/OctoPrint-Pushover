@@ -26,7 +26,7 @@ __plugin_name__ = "Pushover"
 __plugin_pythoncompat__ = ">=3.7,<4"
 
 
-class PushoverPlugin(
+class PushoverPlugin(  # pylint: disable=too-many-ancestors
     octoprint.plugin.EventHandlerPlugin,
     octoprint.plugin.SettingsPlugin,
     octoprint.plugin.StartupPlugin,
@@ -36,8 +36,6 @@ class PushoverPlugin(
     octoprint.plugin.ProgressPlugin,
     octoprint.plugin.OctoPrintPlugin,
 ):
-    # pylint: disable=too-many-ancestors
-
     """
     Plugin information.
     """
@@ -103,164 +101,6 @@ class PushoverPlugin(
                 return flask.jsonify({"success": False, "msg": e.message})
         return flask.make_response("Unknown command", 400)
 
-    def validate_pushover(self, api_key, user_key):
-        """
-        Validate settings, this will do a post request to users/validate.json
-        :param user_key:
-        :return:
-        """
-        if not api_key:
-            raise ValueError("No api key provided")
-        if not user_key:
-            raise ValueError("No user key provided")
-
-        try:
-            r = requests.post(
-                self.api_url + "/users/validate.json",
-                data={
-                    "token": api_key,
-                    "user": user_key,
-                },
-            )
-
-            if r is not None and not r.status_code == 200:
-                raise ValueError(
-                    f"error while instantiating Pushover, header {r.status_code}"
-                )
-
-            response = json.loads(r.content)
-
-            if response["status"] == 1:
-                self._logger.info("Connected to Pushover")
-
-                return True
-
-        except Exception as e:
-            raise ValueError(f"error while instantiating Pushover: {e}") from e
-
-        return False
-
-    def image(self):
-        """
-        Create an image by getting an image form the setting webcam-snapshot.
-        Transpose this image according the settings and returns it
-        :return:
-        """
-        snapshot_url = self._settings.global_get(["webcam", "snapshot"])
-        if not snapshot_url:
-            return None
-
-        self._logger.debug(f"Snapshot URL: {snapshot_url}")
-        try:
-            image = requests.get(snapshot_url, stream=True).content
-        except HTTPError as http_err:
-            self._logger.info(
-                f"HTTP error occured while trying to get image: {http_err}"
-            )
-        except Exception as err:
-            self._logger.info(f"Other error occurred while trying to get image: {err}")
-
-        hflip = self._settings.global_get(["webcam", "flipH"])
-        vflip = self._settings.global_get(["webcam", "flipV"])
-        rotate = self._settings.global_get(["webcam", "rotate90"])
-        if hflip or vflip or rotate:
-            # https://www.blog.pythonlibrary.org/2017/10/05/how-to-rotate-mirror-photos-with-python/
-            image_obj = Image.open(BytesIO(image))
-            if hflip:
-                image_obj = image_obj.transpose(Image.FLIP_LEFT_RIGHT)
-            if vflip:
-                image_obj = image_obj.transpose(Image.FLIP_TOP_BOTTOM)
-            if rotate:
-                image_obj = image_obj.rotate(90)
-            # https://stackoverflow.com/questions/646286/python-pil-how-to-write-png-image-to-string/5504072
-            output = BytesIO()
-            image_obj.save(output, format="JPEG")
-            image = output.getvalue()
-            output.close()
-
-        return image
-
-    def restart_timer(self):
-        if self.timer:
-            self.timer.cancel()
-            self.timer = None
-
-        if self.has_own_token() and self._settings.get(
-            ["events", "TempReached", "priority"]
-        ):
-            self.timer = RepeatedTimer(5, self.temp_check, None, None, True)
-            self.timer.start()
-
-    def temp_check(self):
-
-        if not self.has_own_token():
-            return
-
-        if not self._printer.is_operational():
-            return
-
-        if self._settings.get(["events", "TempReached", "priority"]):
-
-            temps = self._printer.get_current_temperatures()
-
-            bed_temp = round(temps["bed"]["actual"]) if "bed" in temps else 0
-            bed_target = temps["bed"]["target"] if "bed" in temps else 0
-            e1_temp = round(temps["tool0"]["actual"]) if "tool0" in temps else 0
-            e1_target = temps["tool0"]["target"] if "tool0" in temps else 0
-
-            if bed_target > 0 and bed_temp >= bed_target and self.bed_sent is False:
-                self.bed_sent = True
-
-                self.event_message(
-                    {
-                        "message": self._settings.get(
-                            ["events", "TempReached", "message"]
-                        ).format(**locals())
-                    }
-                )
-
-            if e1_target > 0 and e1_temp >= e1_target and self.e1_sent is False:
-                self.e1_sent = True
-
-                self.event_message(
-                    {
-                        "message": self._settings.get(
-                            ["events", "TempReached", "message"]
-                        ).format(**locals())
-                    }
-                )
-
-    def on_print_progress(self, storage, path, progress):
-        if not self.has_own_token():
-            return
-
-        progressMod = self._settings.get(["events", "Progress", "mod"])
-
-        if (
-            self.printing
-            and progressMod
-            and progress > 0
-            and progress % int(progressMod) == 0
-            and self.last_progress != progress
-        ):
-            self.last_progress = progress
-            self.event_message(
-                {
-                    "message": self._settings.get(
-                        ["events", "Progress", "message"]
-                    ).format(percentage=progress),
-                    "priority": self._settings.get(["events", "Scheduled", "priority"]),
-                }
-            )
-
-    def get_mins_since_started(self):
-        if self.start_time:
-            return int(
-                round(
-                    (datetime.datetime.now() - self.start_time).total_seconds() / 60, 0
-                )
-            )
-
     def check_schedule(self):
         """
         Check the scheduler
@@ -283,6 +123,97 @@ class PushoverPlugin(
                     "message": self._settings.get(
                         ["events", "Scheduled", "message"]
                     ).format(elapsed_time=self.last_minute),
+                    "priority": self._settings.get(["events", "Scheduled", "priority"]),
+                }
+            )
+
+    #
+    # Meta
+    #
+
+    def get_update_information(self):
+        return {
+            "pushover": {
+                "displayName": "Pushover Plugin",
+                "displayVersion": self._plugin_version,
+                "type": "github_release",
+                "user": "thijsbekke",
+                "repo": "OctoPrint-Pushover",
+                "current": self._plugin_version,
+                "pip": "https://github.com/thijsbekke/OctoPrint-Pushover/archive/{target_version}.zip",
+            }
+        }
+
+    #
+    # Event Hooks
+    #
+
+    def on_event(self, event, payload):
+        if payload is None:
+            payload = {}
+
+        # StatusNotPrinting
+        self._logger.debug("Got an event: %s, payload: %s" % (event, str(payload)))
+        # It's easier to ask forgiveness than to ask permission.
+        try:
+            # Method exists, and was used.
+            payload["message"] = getattr(self, event)(payload)
+
+            self._logger.debug("Event triggered: %s " % str(event))
+        except AttributeError:
+            self._logger.debug(
+                "event: %s has an AttributeError %s" % (event, str(payload))
+            )
+            # By default the message is simple and does not need any formatting
+            payload["message"] = self._settings.get(["events", event, "message"])
+
+        if payload["message"] is None:
+            return
+
+        # Does the event exists in the settings ? if not we don't want it
+        if not event in self.get_settings_defaults()["events"]:
+            return
+
+        # Only continue when there is a priority
+        priority = self._settings.get(["events", event, "priority"])
+
+        # By default, messages have normal priority (a priority of 0).
+        # We do not support the Emergency Priority (2) because there is no way of canceling it here,
+        if priority:
+            payload["priority"] = priority
+            self.event_message(payload)
+
+    def on_after_startup(self):
+        """
+        Valide settings on startup
+        :return:
+        """
+        try:
+            self.validate_pushover(self.get_token(), self._settings.get(["user_key"]))
+        except Exception as e:
+            self._logger.info(str(e))
+
+        self.restart_timer()
+
+    def on_print_progress(self, storage, path, progress):
+        if not self.has_own_token():
+            return
+
+        progressMod = self._settings.get(["events", "Progress", "mod"])
+
+        if (
+            self.printing
+            and progressMod
+            and progress > 0
+            and progress % int(progressMod) == 0
+            and self.last_progress != progress
+        ):
+            self.last_progress = progress
+            self.event_message(
+                {
+                    "message": self._settings.get(
+                        ["events", "Progress", "message"]
+                    ).format(percentage=progress),
                     "priority": self._settings.get(["events", "Scheduled", "priority"]),
                 }
             )
@@ -315,6 +246,10 @@ class PushoverPlugin(
 
         if gcode and gcode == "M117" and cmd[4:].strip() != "":
             self.m70_cmd = cmd[4:]
+
+    #
+    # Event Handles
+    #
 
     # Start with event handling: http://docs.octoprint.org/en/master/events/index.html
 
@@ -464,115 +399,9 @@ class PushoverPlugin(
             return self._settings.get(["events", "Error", "message"]).format(**locals())
         return
 
-    def on_event(self, event, payload):
-
-        if payload is None:
-            payload = {}
-
-        # StatusNotPrinting
-        self._logger.debug("Got an event: %s, payload: %s" % (event, str(payload)))
-        # It's easier to ask forgiveness than to ask permission.
-        try:
-            # Method exists, and was used.
-            payload["message"] = getattr(self, event)(payload)
-
-            self._logger.debug("Event triggered: %s " % str(event))
-        except AttributeError:
-            self._logger.debug(
-                "event: %s has an AttributeError %s" % (event, str(payload))
-            )
-            # By default the message is simple and does not need any formatting
-            payload["message"] = self._settings.get(["events", event, "message"])
-
-        if payload["message"] is None:
-            return
-
-        # Does the event exists in the settings ? if not we don't want it
-        if not event in self.get_settings_defaults()["events"]:
-            return
-
-        # Only continue when there is a priority
-        priority = self._settings.get(["events", event, "priority"])
-
-        # By default, messages have normal priority (a priority of 0).
-        # We do not support the Emergency Priority (2) because there is no way of canceling it here,
-        if priority:
-            payload["priority"] = priority
-            self.event_message(payload)
-
-    def event_message(self, payload):
-        """
-        Do send the notification to the cloud :)
-        :param payload:
-        :return:
-        """
-        # Create an url, if the fqdn is not correct you can manually set it at your config.yaml
-        url = self._settings.get(["url"])
-        if url:
-            payload["url"] = url
-        else:
-            # Create an url
-            import socket
-
-            payload["url"] = "http://%s" % socket.getfqdn()
-
-        if "token" not in payload:
-            payload["token"] = self.get_token()
-
-        if "user" not in payload:
-            payload["user"] = self._settings.get(["user_key"])
-
-        if "sound" not in payload:
-            # If no sound parameter is specified, the user"s default tone will play.
-            # If the user has not chosen a custom sound, the standard Pushover sound will play.
-            sound = self._settings.get(["sound"])
-            if sound:
-                payload["sound"] = sound
-
-        if "device" not in payload:
-            # If no device parameter is specified, get it from the settings.
-            device = self._settings.get(["device"])
-            if device:
-                payload["device"] = device
-
-        if (
-            self._printer_profile_manager is not None
-            and "name" in self._printer_profile_manager.get_current_or_default()
-        ):
-            payload["title"] = (
-                "Octoprint: %s"
-                % self._printer_profile_manager.get_current_or_default()["name"]
-            )
-
-        files = {}
-        try:
-            if self._settings.get(["image"]) or (
-                "image" in payload and payload["image"]
-            ):
-                files["attachment"] = ("image.jpg", self.image())
-        except Exception as e:
-            self._logger.info("Could not load image from url")
-
-        # Multiple try catches so it will always send a message if the image raises an Exception
-        try:
-            r = requests.post(
-                self.api_url + "/messages.json", files=files, data=payload
-            )
-            self._logger.debug("Response: %s" % str(r.content))
-        except Exception as e:
-            self._logger.info("Could not send message: %s" % str(e))
-
-    def on_after_startup(self):
-        """
-        Valide settings on startup
-        :return:
-        """
-        try:
-            self.validate_pushover(self.get_token(), self._settings.get(["user_key"]))
-        except Exception as e:
-            self._logger.info(str(e))
-
-        self.restart_timer()
+    #
+    # Settings
+    #
 
     def get_settings_version(self):
         return 1
@@ -627,15 +456,6 @@ class PushoverPlugin(
     def get_settings_restricted_paths(self):
         # only used in OctoPrint versions > 1.2.16
         return {"admin": ["default_token", "token", "user_key"]}
-
-    def has_own_token(self):
-        return self.get_token() != self._settings.get(["default_token"])
-
-    def get_token(self):
-        if not self._settings.get(["token"]):
-            # If an users don't want an own API key, it is ok, you can use mine.
-            return self._settings.get(["default_token"])
-        return self._settings.get(["token"])
 
     def get_settings_defaults(self):
         return {
@@ -777,11 +597,117 @@ class PushoverPlugin(
             },
         }
 
-    def get_template_vars(self):
-        return {
-            "sounds": self.get_sounds(),
-            "events": self.get_settings_defaults()["events"],
-        }
+    #
+    # Pushover
+    #
+
+    def event_message(self, payload):
+        """
+        Do send the notification to the cloud :)
+        :param payload:
+        :return:
+        """
+        # Create an url, if the fqdn is not correct you can manually set it at your config.yaml
+        url = self._settings.get(["url"])
+        if url:
+            payload["url"] = url
+        else:
+            # Create an url
+            import socket
+
+            payload["url"] = "http://%s" % socket.getfqdn()
+
+        if "token" not in payload:
+            payload["token"] = self.get_token()
+
+        if "user" not in payload:
+            payload["user"] = self._settings.get(["user_key"])
+
+        if "sound" not in payload:
+            # If no sound parameter is specified, the user"s default tone will play.
+            # If the user has not chosen a custom sound, the standard Pushover sound will play.
+            sound = self._settings.get(["sound"])
+            if sound:
+                payload["sound"] = sound
+
+        if "device" not in payload:
+            # If no device parameter is specified, get it from the settings.
+            device = self._settings.get(["device"])
+            if device:
+                payload["device"] = device
+
+        if (
+            self._printer_profile_manager is not None
+            and "name" in self._printer_profile_manager.get_current_or_default()
+        ):
+            payload["title"] = (
+                "Octoprint: %s"
+                % self._printer_profile_manager.get_current_or_default()["name"]
+            )
+
+        files = {}
+        try:
+            if self._settings.get(["image"]) or (
+                "image" in payload and payload["image"]
+            ):
+                files["attachment"] = ("image.jpg", self.image())
+        except Exception as e:
+            self._logger.info("Could not load image from url")
+
+        # Multiple try catches so it will always send a message if the image raises an Exception
+        try:
+            r = requests.post(
+                self.api_url + "/messages.json", files=files, data=payload
+            )
+            self._logger.debug("Response: %s" % str(r.content))
+        except Exception as e:
+            self._logger.info("Could not send message: %s" % str(e))
+
+    def has_own_token(self):
+        return self.get_token() != self._settings.get(["default_token"])
+
+    def get_token(self):
+        if not self._settings.get(["token"]):
+            # If an users don't want an own API key, it is ok, you can use mine.
+            return self._settings.get(["default_token"])
+        return self._settings.get(["token"])
+
+    def validate_pushover(self, api_key, user_key):
+        """
+        Validate settings, this will do a post request to users/validate.json
+        :param user_key:
+        :return:
+        """
+        if not api_key:
+            raise ValueError("No api key provided")
+        if not user_key:
+            raise ValueError("No user key provided")
+
+        try:
+            r = requests.post(
+                self.api_url + "/users/validate.json",
+                data={
+                    "token": api_key,
+                    "user": user_key,
+                },
+            )
+
+            if r is not None and not r.status_code == 200:
+                raise ValueError(
+                    f"error while instantiating Pushover, header {r.status_code}"
+                )
+
+            response = json.loads(r.content)
+
+            if response["status"] == 1:
+                self._logger.info("Connected to Pushover")
+
+                return True
+
+        except Exception as e:
+            raise ValueError(f"error while instantiating Pushover: {e}") from e
+
+        return False
 
     def get_sounds(self):
         try:
@@ -791,21 +717,123 @@ class PushoverPlugin(
             self._logger.debug(str(e))
             return {}
 
+    #
+    # UI
+    #
+
     def get_template_configs(self):
         return [{"type": "settings", "name": "Pushover", "custom_bindings": True}]
 
-    def get_update_information(self):
+    def get_template_vars(self):
         return {
-            "pushover": {
-                "displayName": "Pushover Plugin",
-                "displayVersion": self._plugin_version,
-                "type": "github_release",
-                "user": "thijsbekke",
-                "repo": "OctoPrint-Pushover",
-                "current": self._plugin_version,
-                "pip": "https://github.com/thijsbekke/OctoPrint-Pushover/archive/{target_version}.zip",
-            }
+            "sounds": self.get_sounds(),
+            "events": self.get_settings_defaults()["events"],
         }
+
+    #
+    # Unknown Functionality
+    #
+
+    # TODO: refactor
+    def image(self):
+        """
+        Create an image by getting an image form the setting webcam-snapshot.
+        Transpose this image according the settings and returns it
+        :return:
+        """
+        snapshot_url = self._settings.global_get(["webcam", "snapshot"])
+        if not snapshot_url:
+            return None
+
+        self._logger.debug(f"Snapshot URL: {snapshot_url}")
+        try:
+            image = requests.get(snapshot_url, stream=True).content
+        except HTTPError as http_err:
+            self._logger.info(
+                f"HTTP error occured while trying to get image: {http_err}"
+            )
+        except Exception as err:
+            self._logger.info(f"Other error occurred while trying to get image: {err}")
+
+        hflip = self._settings.global_get(["webcam", "flipH"])
+        vflip = self._settings.global_get(["webcam", "flipV"])
+        rotate = self._settings.global_get(["webcam", "rotate90"])
+        if hflip or vflip or rotate:
+            # https://www.blog.pythonlibrary.org/2017/10/05/how-to-rotate-mirror-photos-with-python/
+            image_obj = Image.open(BytesIO(image))
+            if hflip:
+                image_obj = image_obj.transpose(Image.FLIP_LEFT_RIGHT)
+            if vflip:
+                image_obj = image_obj.transpose(Image.FLIP_TOP_BOTTOM)
+            if rotate:
+                image_obj = image_obj.rotate(90)
+            # https://stackoverflow.com/questions/646286/python-pil-how-to-write-png-image-to-string/5504072
+            output = BytesIO()
+            image_obj.save(output, format="JPEG")
+            image = output.getvalue()
+            output.close()
+
+        return image
+
+    # TODO: refactor
+    def restart_timer(self):
+        if self.timer:
+            self.timer.cancel()
+            self.timer = None
+
+        if self.has_own_token() and self._settings.get(
+            ["events", "TempReached", "priority"]
+        ):
+            self.timer = RepeatedTimer(5, self.temp_check, None, None, True)
+            self.timer.start()
+
+    def temp_check(self):
+
+        if not self.has_own_token():
+            return
+
+        if not self._printer.is_operational():
+            return
+
+        if self._settings.get(["events", "TempReached", "priority"]):
+
+            temps = self._printer.get_current_temperatures()
+
+            bed_temp = round(temps["bed"]["actual"]) if "bed" in temps else 0
+            bed_target = temps["bed"]["target"] if "bed" in temps else 0
+            e1_temp = round(temps["tool0"]["actual"]) if "tool0" in temps else 0
+            e1_target = temps["tool0"]["target"] if "tool0" in temps else 0
+
+            if bed_target > 0 and bed_temp >= bed_target and self.bed_sent is False:
+                self.bed_sent = True
+
+                self.event_message(
+                    {
+                        "message": self._settings.get(
+                            ["events", "TempReached", "message"]
+                        ).format(**locals())
+                    }
+                )
+
+            if e1_target > 0 and e1_temp >= e1_target and self.e1_sent is False:
+                self.e1_sent = True
+
+                self.event_message(
+                    {
+                        "message": self._settings.get(
+                            ["events", "TempReached", "message"]
+                        ).format(**locals())
+                    }
+                )
+
+    def get_mins_since_started(self):
+        if self.start_time:
+            return int(
+                round(
+                    (datetime.datetime.now() - self.start_time).total_seconds() / 60, 0
+                )
+            )
+
 
 
 __plugin_name__ = "Pushover"
