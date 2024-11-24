@@ -64,8 +64,9 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
         "waving_hand_sign": "\U0001f44b",
     }
 
-    def get_assets(self):
-        return {"js": ["js/pushover.js"]}
+    #
+    # API
+    #
 
     def get_api_commands(self):
         return {"test": ["api_key", "user_key"]}
@@ -101,32 +102,6 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
                 return flask.jsonify({"success": False, "msg": e.message})
         return flask.make_response("Unknown command", 400)
 
-    def check_schedule(self):
-        """
-        Check the scheduler
-        Send a notification
-        """
-        if not self.has_own_token():
-            return
-
-        scheduleMod = self._settings.get(["events", "Scheduled", "mod"])
-
-        if (
-            self.printing
-            and scheduleMod
-            and self.last_minute > 0
-            and self.last_minute % int(scheduleMod) == 0
-        ):
-
-            self.event_message(
-                {
-                    "message": self._settings.get(
-                        ["events", "Scheduled", "message"]
-                    ).format(elapsed_time=self.last_minute),
-                    "priority": self._settings.get(["events", "Scheduled", "priority"]),
-                }
-            )
-
     #
     # Meta
     #
@@ -137,12 +112,29 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
                 "displayName": "Pushover Plugin",
                 "displayVersion": self._plugin_version,
                 "type": "github_release",
-                "user": "thijsbekke",
+                "user": "itisrazza",
                 "repo": "OctoPrint-Pushover",
                 "current": self._plugin_version,
-                "pip": "https://github.com/thijsbekke/OctoPrint-Pushover/archive/{target_version}.zip",
+                "pip": "https://github.com/itisrazza/OctoPrint-Pushover/archive/{target_version}.zip",
             }
         }
+
+    #
+    # UI
+    #
+
+    def get_assets(self):
+        return {"js": ["js/pushover.js"]}
+
+    def get_template_configs(self):
+        return [{"type": "settings", "name": "Pushover", "custom_bindings": True}]
+
+    def get_template_vars(self):
+        return {
+            "sounds": self.get_sounds(),
+            "events": self.get_settings_defaults()["events"],
+        }
+
 
     #
     # Event Hooks
@@ -248,7 +240,7 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
             self.m70_cmd = cmd[4:]
 
     #
-    # Event Handles
+    # Event Handlers
     #
 
     # Start with event handling: http://docs.octoprint.org/en/master/events/index.html
@@ -718,21 +710,34 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
             return {}
 
     #
-    # UI
-    #
-
-    def get_template_configs(self):
-        return [{"type": "settings", "name": "Pushover", "custom_bindings": True}]
-
-    def get_template_vars(self):
-        return {
-            "sounds": self.get_sounds(),
-            "events": self.get_settings_defaults()["events"],
-        }
-
-    #
     # Unknown Functionality
     #
+
+    def check_schedule(self):
+        """
+        Check the scheduler
+        Send a notification
+        """
+        if not self.has_own_token():
+            return
+
+        scheduleMod = self._settings.get(["events", "Scheduled", "mod"])
+
+        if (
+            self.printing
+            and scheduleMod
+            and self.last_minute > 0
+            and self.last_minute % int(scheduleMod) == 0
+        ):
+
+            self.event_message(
+                {
+                    "message": self._settings.get(
+                        ["events", "Scheduled", "message"]
+                    ).format(elapsed_time=self.last_minute),
+                    "priority": self._settings.get(["events", "Scheduled", "priority"]),
+                }
+            )
 
     # TODO: refactor
     def image(self):
