@@ -23,7 +23,7 @@ __author__ = "Thijs Bekke <thijsbekke@gmail.com>, Raresh Nistor <raresh@nistor.e
 __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agpl.html"
 __copyright__ = "Released under terms of the AGPLv3 License"
 __plugin_name__ = "Pushover"
-__plugin_pythoncompat__ = ">=2.7,<4"
+__plugin_pythoncompat__ = ">=3.7,<4"
 
 
 class PushoverPlugin(
