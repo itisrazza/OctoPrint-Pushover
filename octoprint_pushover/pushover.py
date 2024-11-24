@@ -22,11 +22,15 @@ class Attachment:
 
 
 class Priority(IntEnum):
-    VERY_LOW = -2
+    """
+    Message priorities.
+    """
+
+    LOWEST = -2
     LOW = -1
-    DEFAULT = 0
+    NORMAL = 0
     HIGH = 1
-    VERY_HIGH = 1
+    EMERGENCY = 2
 
 
 class PushoverError(Exception):
@@ -45,6 +49,49 @@ class PushoverError(Exception):
         self.message = message
         self.response = response
 
+    @classmethod
+    def request_fail(cls):
+        """Creates a new PushoverException for when a request fails to send to Pushover."""
+        return cls("Failed to send request to Pushover")
+
+    @classmethod
+    def status_code(cls, response: Response):
+        """
+        Creates a new PushoverException for when Pushover responds with
+        an unexpected status code.
+        """
+        return cls(
+                f"Pushover returned {response.status_code}",
+                response=response,
+            )
+
+    @classmethod
+    def parse_fail(cls, response: Response):
+        """Creates a new PushoverException for when a response cannot be parsed."""
+        return PushoverError(
+                "Failed to parse response",
+                response=response,
+            )
+
+    @classmethod
+    def request_reject(cls, response: Response):
+        """Creates a new PushoverException for when Pushover rejects a request (status code 4xx)."""
+        return PushoverError("Pushover rejected the message request", response=response)
+
+
+@dataclass
+class MessageResponse:
+    """
+    Values provided by Pushover for message responses.
+
+    :param receipt: if the message priority was set to EMERGENCY (2), this will return an ID to be
+                    used with the receipts API.
+    :param request: the request ID
+    """
+
+    receipt: Optional[str]
+    request: str
+
 
 class Pushover:
     """
@@ -57,13 +104,6 @@ class Pushover:
         self.token = token
         self.user = user
         self.timeout = timeout
-
-    def _request_body(self, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        data = dict(data) if data is not None else {}
-        data["token"] = self.token
-        data["user"] = self.user
-
-        return data
 
     def validate(self) -> bool:
         """
@@ -82,21 +122,15 @@ class Pushover:
                 timeout=self.timeout,
             )
         except RequestException as e:
-            raise PushoverError("Failed to send request to Pushover") from e
+            raise PushoverError.request_fail() from e
 
         if response.status_code != 200:
-            raise PushoverError(
-                f"Pushover returned {response.status_code}",
-                response=response,
-            )
+            raise PushoverError.status_code(response)
 
         try:
             return response.json()["status"] == "1"
         except (JSONDecodeError, KeyError) as e:
-            raise PushoverError(
-                "Failed to parse response",
-                response=response,
-            ) from e
+            raise PushoverError.parse_fail(response) from e
 
     def send_message(
         self,
@@ -107,14 +141,13 @@ class Pushover:
         attachment: Optional[Attachment] = None,
         device: Optional[str] = None,
         html: bool = False,
-        priority: Priority = Priority.DEFAULT,
+        priority: Priority = Priority.NORMAL,
         sound: Optional[str] = None,
         timestamp: Optional[datetime] = None,
         ttl: Optional[int] = None,
     ):
-        # pylint: disable=too-many-arguments
         """
-        Send a message.
+        Send a message through Pushover.
 
         :param message: your message
         :param title: your message's title, otherwise your app's name is used
@@ -123,11 +156,12 @@ class Pushover:
         :param attachment: a binary image attachment to send with the message
         :param device: the name of one of your devices to send just to that device instead of all
         :param html: whether to allow some limited markup (see https://pushover.net/api#html)
-        :param priority:
+        :param priority: message priority
         :param sound: the name of a supported sound to override your default sound choice
         :param timestamp: a timestamp of a time to display instead of when our API received it
         :param ttl: a number of seconds that the message will live, before being auto-deleted
         """
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
 
         files: Optional[dict[str, bytes]] = None
         data: dict[str, Any] = self._request_body({"message": message})
@@ -150,7 +184,7 @@ class Pushover:
         if html:
             data["html"] = "1"
 
-        if priority != Priority.DEFAULT:
+        if priority != Priority.NORMAL:
             data["priority"] = int(priority)
 
         if sound is not None:
@@ -162,9 +196,32 @@ class Pushover:
         if ttl is not None:
             data["ttl"] = ttl
 
-        post(
-            f"{self.BASE_URL}/messages.json",
-            data=data,
-            files=files,
-            timeout=self.timeout,
-        )
+        try:
+            response = post(
+                f"{self.BASE_URL}/messages.json",
+                data=data,
+                files=files,
+                timeout=self.timeout,
+            )
+        except RequestException as e:
+            raise PushoverError.request_fail() from e
+
+        if response.status_code in range(400, 500):
+            raise PushoverError.request_reject(response)
+
+        if response.status_code != 200:
+            raise PushoverError.status_code(response)
+
+        try:
+            payload = response.json()
+            return MessageResponse(payload.get("receipt", None), payload["request"])
+        except (JSONDecodeError, KeyError) as e:
+            raise PushoverError.parse_fail(response) from e
+
+
+    def _request_body(self, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        data = dict(data) if data is not None else {}
+        data["token"] = self.token
+        data["user"] = self.user
+
+        return data

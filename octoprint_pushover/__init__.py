@@ -26,7 +26,7 @@ __plugin_name__ = "Pushover"
 __plugin_pythoncompat__ = ">=2.7,<4"
 
 
-class PushoverPlugin(  # pylint: disable=too-many-ancestors
+class PushoverPlugin(
     octoprint.plugin.EventHandlerPlugin,
     octoprint.plugin.SettingsPlugin,
     octoprint.plugin.StartupPlugin,
@@ -36,6 +36,8 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
     octoprint.plugin.ProgressPlugin,
     octoprint.plugin.OctoPrintPlugin,
 ):
+    # pylint: disable=too-many-ancestors
+
     """
     Plugin information.
     """
