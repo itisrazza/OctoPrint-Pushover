@@ -61,17 +61,17 @@ class PushoverError(Exception):
         an unexpected status code.
         """
         return cls(
-                f"Pushover returned {response.status_code}",
-                response=response,
-            )
+            f"Pushover returned {response.status_code}",
+            response=response,
+        )
 
     @classmethod
     def parse_fail(cls, response: Response):
         """Creates a new PushoverException for when a response cannot be parsed."""
         return PushoverError(
-                "Failed to parse response",
-                response=response,
-            )
+            "Failed to parse response",
+            response=response,
+        )
 
     @classmethod
     def request_reject(cls, response: Response):
@@ -224,7 +224,11 @@ class Pushover:
         """
 
         try:
-            response = get(f"{self.BASE_URL}/sounds.json", { "token", self.token }, timeout=self.timeout)
+            response = get(
+                f"{self.BASE_URL}/sounds.json",
+                {"token", self.token},
+                timeout=self.timeout,
+            )
         except RequestException as e:
             raise PushoverError.request_fail() from e
 
