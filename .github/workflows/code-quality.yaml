@@ -19,10 +19,10 @@ jobs:
         pip install -r requirements.txt
     - name: Code Quality (pylint)
       if: success() || failure()
-      run: pylint $(git ls-files '*.py')
+      run: pylint octoprint_pushover
     - name: Type Checking (mypy)
       if: success() || failure()
-      run: mypy $(git ls-files '*.py')
+      run: mypy octoprint_pushover
     - name: Code Formatting (black)
       if: success() || failure()
       run: black --check $(git ls-files '*.py')
