@@ -121,16 +121,16 @@ class Pushover:
                 data=self._request_body(),
                 timeout=self.timeout,
             )
-        except RequestException as e:
-            raise PushoverError.request_fail() from e
+        except RequestException as ex:
+            raise PushoverError.request_fail() from ex
 
         if response.status_code != 200:
             raise PushoverError.status_code(response)
 
         try:
             return response.json()["status"] == "1"
-        except (JSONDecodeError, KeyError) as e:
-            raise PushoverError.parse_fail(response) from e
+        except (JSONDecodeError, KeyError) as ex:
+            raise PushoverError.parse_fail(response) from ex
 
     def send_message(
         self,
@@ -161,7 +161,7 @@ class Pushover:
         :param timestamp: a timestamp of a time to display instead of when our API received it
         :param ttl: a number of seconds that the message will live, before being auto-deleted
         """
-        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
+        # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
 
         files: Optional[Dict[str, bytes]] = None
         data: Dict[str, Any] = self._request_body({"message": message})
@@ -203,8 +203,8 @@ class Pushover:
                 files=files,
                 timeout=self.timeout,
             )
-        except RequestException as e:
-            raise PushoverError.request_fail() from e
+        except RequestException as ex:
+            raise PushoverError.request_fail() from ex
 
         if response.status_code in range(400, 500):
             raise PushoverError.request_reject(response)
@@ -215,8 +215,8 @@ class Pushover:
         try:
             payload = response.json()
             return MessageResponse(payload.get("receipt", None), payload["request"])
-        except (JSONDecodeError, KeyError) as e:
-            raise PushoverError.parse_fail(response) from e
+        except (JSONDecodeError, KeyError) as ex:
+            raise PushoverError.parse_fail(response) from ex
 
     def get_sounds(self) -> Dict[str, str]:
         """
@@ -229,16 +229,16 @@ class Pushover:
                 [("token", self.token)],
                 timeout=self.timeout,
             )
-        except RequestException as e:
-            raise PushoverError.request_fail() from e
+        except RequestException as ex:
+            raise PushoverError.request_fail() from ex
 
         if response.status_code != 200:
             raise PushoverError.status_code(response)
 
         try:
             return response.json()["sounds"]
-        except (JSONDecodeError, KeyError) as e:
-            raise PushoverError.parse_fail(response) from e
+        except (JSONDecodeError, KeyError) as ex:
+            raise PushoverError.parse_fail(response) from ex
 
     def _request_body(self, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         data = dict(data) if data is not None else {}

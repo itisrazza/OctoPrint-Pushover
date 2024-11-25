@@ -92,7 +92,6 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
 
     def on_api_command(self, command, data):
         if command == "test":
-
             if not data["api_key"]:
                 data["api_key"] = self.get_token()
 
@@ -610,7 +609,6 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
             and self.print_state.last_minute > 0
             and self.print_state.last_minute % int(scheduleMod) == 0
         ):
-
             self.event_message(
                 {
                     "message": self._settings.get(
@@ -679,7 +677,6 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
             return
 
         if self._settings.get(["events", "TempReached", "priority"]):
-
             temps = self._printer.get_current_temperatures()
 
             bed_temp = round(temps["bed"]["actual"]) if "bed" in temps else 0

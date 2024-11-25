@@ -39,7 +39,7 @@ class PrintState:
     def on_print_z_change(self, payload):
         """Sets the state for Z-height changes."""
 
-        # TODO: make the Z change setting changeable
+        # FUTURE: make the Z change setting changeable
         if payload["new"] < 2 or payload["old"] is None:
             return
 
@@ -47,6 +47,8 @@ class PrintState:
 
     @property
     def minutes_since_started(self):
+        """Returns the number of minutes elapsed from start_time."""
+
         if self.start_time is None:
             return None
 
