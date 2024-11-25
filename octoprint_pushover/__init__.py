@@ -2,12 +2,25 @@
 Module entry point for Pushover notifications.
 """
 
+# we have a lot of old code raising issues, I'll turn them on when they've been cleared
+# pylint: disable=line-too-long
+# pylint: disable=broad-exception-caught
+# pylint: disable=import-outside-toplevel
+# pylint: disable=consider-using-f-string
+# pylint: disable=missing-timeout
+# pylint: disable=missing-function-docstring
+# pylint: disable=too-many-public-methods
+# pylint: disable=invalid-name
+# pylint: disable=chained-comparison
+
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
 import json
 from io import BytesIO
 import datetime
+from typing import Dict, Callable, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 import octoprint.util
 import octoprint.plugin
@@ -18,6 +31,10 @@ from flask_login import current_user
 import requests
 from requests.exceptions import HTTPError
 from PIL import Image
+
+from .events import EventHandlers
+from .pushover import Pushover
+from .print_state import PrintState
 
 __author__ = "Thijs Bekke <thijsbekke@gmail.com>, Raresh Nistor <raresh@nistor.email>"
 __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agpl.html"
@@ -41,12 +58,6 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
     """
 
     api_url = "https://api.pushover.net/1"
-    m70_cmd = ""
-    printing = False
-    start_time = None
-    last_minute = 0
-    last_progress = 0
-    first_layer = False
     timer = None
     bed_sent = False
     e1_sent = False
@@ -63,6 +74,14 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
         "four_leaf_clover": "\U0001f340",
         "waving_hand_sign": "\U0001f44b",
     }
+
+    def __init__(self):
+        super().__init__()
+
+        self.executor = ThreadPoolExecutor(thread_name_prefix="OctoPrint-Pushover")
+
+        self.events = EventHandlers(self)
+        self.print_state = PrintState(self)
 
     #
     # API
@@ -99,7 +118,9 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
                 self.event_message(payload)
                 return flask.jsonify({"success": True})
             except Exception as e:
-                return flask.jsonify({"success": False, "msg": e.message})
+                return flask.jsonify(
+                    {"success": False, "msg": e.message}  # pylint: disable=no-member
+                )
         return flask.make_response("Unknown command", 400)
 
     #
@@ -107,6 +128,8 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
     #
 
     def get_update_information(self):
+        """Returns plugin update information for 'octoprint.plugin.softwareupdate.check_config'."""
+
         return {
             "pushover": {
                 "displayName": "Pushover Plugin",
@@ -115,7 +138,12 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
                 "user": "itisrazza",
                 "repo": "OctoPrint-Pushover",
                 "current": self._plugin_version,
-                "pip": "https://github.com/itisrazza/OctoPrint-Pushover/archive/{target_version}.zip",
+                "pip": "".join(
+                    [
+                        "https://github.com/itisrazza/OctoPrint-Pushover/archive/",
+                        "{target_version}.zip",
+                    ]
+                ),
             }
         }
 
@@ -135,45 +163,27 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
             "events": self.get_settings_defaults()["events"],
         }
 
-
     #
     # Event Hooks
     #
 
     def on_event(self, event, payload):
-        if payload is None:
-            payload = {}
+        handlers = {
+            "Startup": lambda: self.events.on_system_startup(payload),
+            "Shutdown": lambda: self.events.on_system_shutdown(payload),
+            "Error": lambda: self.events.on_system_error(payload),
+            "PrintDone": lambda: self.events.on_print_done(payload),
+            "PrintFailed": lambda: self.events.on_print_failed(payload),
+            "FilamentChange": lambda: self.events.on_filament_change(payload),
+            "PrintPaused": lambda: self.events.on_print_paused(payload),
+            "Waiting": lambda: self.events.on_print_waiting(payload),
+            "ZChange": lambda: self.events.on_print_z_change(payload),
+        }
 
-        # StatusNotPrinting
-        self._logger.debug("Got an event: %s, payload: %s" % (event, str(payload)))
-        # It's easier to ask forgiveness than to ask permission.
-        try:
-            # Method exists, and was used.
-            payload["message"] = getattr(self, event)(payload)
-
-            self._logger.debug("Event triggered: %s " % str(event))
-        except AttributeError:
-            self._logger.debug(
-                "event: %s has an AttributeError %s" % (event, str(payload))
-            )
-            # By default the message is simple and does not need any formatting
-            payload["message"] = self._settings.get(["events", event, "message"])
-
-        if payload["message"] is None:
+        if event not in handlers:
             return
 
-        # Does the event exists in the settings ? if not we don't want it
-        if not event in self.get_settings_defaults()["events"]:
-            return
-
-        # Only continue when there is a priority
-        priority = self._settings.get(["events", event, "priority"])
-
-        # By default, messages have normal priority (a priority of 0).
-        # We do not support the Emergency Priority (2) because there is no way of canceling it here,
-        if priority:
-            payload["priority"] = priority
-            self.event_message(payload)
+        handlers[event](payload)
 
     def on_after_startup(self):
         """
@@ -194,13 +204,13 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
         progressMod = self._settings.get(["events", "Progress", "mod"])
 
         if (
-            self.printing
+            self.print_state.is_printing
             and progressMod
             and progress > 0
             and progress % int(progressMod) == 0
-            and self.last_progress != progress
+            and self.print_state.last_progress != progress
         ):
-            self.last_progress = progress
+            self.print_state.last_progress = progress
             self.event_message(
                 {
                     "message": self._settings.get(
@@ -210,7 +220,16 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
                 }
             )
 
-    def sent_gcode(self, comm_instance, phase, cmd, cmd_type, gcode, *args, **kwargs):
+    def sent_gcode(
+        self,
+        _comm_instance,
+        _phase,
+        cmd,
+        _cmd_type,
+        gcode,
+        *_args,
+        **_kwargs,
+    ):
         """
         M70 Gcode commands are used for sending a text when print is paused
         :param comm_instance:
@@ -224,179 +243,27 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
         """
 
         if gcode and gcode != "G1":
-            mss = self.get_mins_since_started()
+            minutes = self.print_state.minutes_since_started
 
-            if self.last_minute != mss:
-                self.last_minute = mss
+            if self.print_state.last_minute != minutes:
+                self.print_state.last_minute = minutes
                 self.check_schedule()
 
         if gcode and gcode == "M600":
             self.on_event("FilamentChange", None)
 
         if gcode and gcode == "M70":
-            self.m70_cmd = cmd[3:]
+            self.print_state.m70_cmd = cmd[3:]
 
         if gcode and gcode == "M117" and cmd[4:].strip() != "":
-            self.m70_cmd = cmd[4:]
-
-    #
-    # Event Handlers
-    #
-
-    # Start with event handling: http://docs.octoprint.org/en/master/events/index.html
-
-    def PrintDone(self, payload):
-        """
-        When the print is done, enhance the payload with the filename and the elased time and
-        returns it
-
-        :param payload:
-        :return:
-        """
-        self.printing = False
-        self.last_minute = 0
-        self.last_progress = 0
-        self.start_time = None
-        file = os.path.basename(payload["name"])
-        elapsed_time_in_seconds = payload["time"]
-
-        elapsed_time = octoprint.util.get_formatted_timedelta(
-            datetime.timedelta(seconds=elapsed_time_in_seconds)
-        )
-
-        # Create the message
-        return self._settings.get(["events", "PrintDone", "message"]).format(**locals())
-
-    def PrintFailed(self, payload):
-        """
-        When the print is failed, enhance the payload with the filename and returns it
-        :param payload:
-        :return:
-        """
-        self.printing = False
-        if "name" in payload:
-            file = os.path.basename(payload["name"])
-        return self._settings.get(["events", "PrintFailed", "message"]).format(
-            **locals()
-        )
-
-    def FilamentChange(self, payload):
-        """
-        When a M600 command is received the user is asked to change the filament
-        :param payload:
-        :return:
-        """
-        m70_cmd = ""
-        if self.m70_cmd != "":
-            m70_cmd = "(" + self.m70_cmd.strip() + ")"
-
-        return self._settings.get(["events", "FilamentChange", "message"]).format(
-            **locals()
-        )
-
-    def PrintPaused(self, payload):
-        """
-        When the print is paused check if there is a m70 command, and replace that in the message.
-        :param payload:
-        :return:
-        """
-        m70_cmd = ""
-        if self.m70_cmd != "":
-            m70_cmd = self.m70_cmd
-
-        return self._settings.get(["events", "PrintPaused", "message"]).format(
-            **locals()
-        )
-
-    def Waiting(self, payload):
-        """
-        Alias for PrintPaused
-        :param payload:
-        :return:
-        """
-        return self.PrintPaused(payload)
-
-    def PrintStarted(self, payload):
-        """
-        Reset value's
-        :param payload:
-        :return:
-        """
-
-        self.printing = True
-        self.start_time = datetime.datetime.now()
-        self.m70_cmd = ""
-        self.bed_sent = False
-        self.e1_sent = False
-        self.first_layer = True
-        self.restart_timer()
-
-        if not self.has_own_token():
-            return
-
-        return self._settings.get(["events", "PrintStarted", "message"])
-
-    def ZChange(self, payload):
-        """
-        ZChange event which send a notification, this does not work when printing from sd
-        :param payload:
-        :return:
-        """
-
-        if not self.has_own_token():
-            return
-
-        if not self.printing:
-            return
-
-        if not self.first_layer:
-            return
-
-        # It is not actually the first layer, it was not my plan too create a lot of code for this
-        # feature
-        if payload["new"] < 2 or payload["old"] is None:
-            return
-
-        self.first_layer = False
-        return self._settings.get(["events", "ZChange", "message"]).format(**locals())
-
-    def Startup(self, payload):
-        """
-        Event triggered when printer is started up
-        :param payload:
-        :return:
-        """
-        if not self.has_own_token():
-            return
-        return self._settings.get(["events", "Startup", "message"])
-
-    def Shutdown(self, payload):
-        """
-        PrinterShutdown
-        :param payload:
-        :return:
-        """
-        if not self.has_own_token():
-            return
-        return self._settings.get(["events", "Shutdown", "message"])
-
-    def Error(self, payload):
-        """
-        Only continue when the current state is printing
-        :param payload:
-        :return:
-        """
-        if self.printing:
-            error = payload["error"]
-            return self._settings.get(["events", "Error", "message"]).format(**locals())
-        return
+            self.print_state.m70_cmd = cmd[4:]
 
     #
     # Settings
     #
 
     def get_settings_version(self):
-        return 1
+        return 2
 
     def on_settings_migrate(self, target, current=None):
         if current is None:
@@ -593,6 +460,20 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
     # Pushover
     #
 
+    @property
+    def pushover(self) -> Optional[Pushover]:
+        """
+        Pushover messaging service, if the user provided the necessary tokens.
+        """
+
+        token = self._settings.get(["token"])
+        user = self._settings.get(["user_key"])
+
+        if token is not None and user is not None:
+            return Pushover(token, user)
+
+        return None
+
     def event_message(self, payload):
         """
         Do send the notification to the cloud :)
@@ -643,7 +524,7 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
                 "image" in payload and payload["image"]
             ):
                 files["attachment"] = ("image.jpg", self.image())
-        except Exception as e:
+        except Exception:
             self._logger.info("Could not load image from url")
 
         # Multiple try catches so it will always send a message if the image raises an Exception
@@ -724,22 +605,21 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
         scheduleMod = self._settings.get(["events", "Scheduled", "mod"])
 
         if (
-            self.printing
+            self.print_state.is_printing
             and scheduleMod
-            and self.last_minute > 0
-            and self.last_minute % int(scheduleMod) == 0
+            and self.print_state.last_minute > 0
+            and self.print_state.last_minute % int(scheduleMod) == 0
         ):
 
             self.event_message(
                 {
                     "message": self._settings.get(
                         ["events", "Scheduled", "message"]
-                    ).format(elapsed_time=self.last_minute),
+                    ).format(elapsed_time=self.print_state.last_minute),
                     "priority": self._settings.get(["events", "Scheduled", "priority"]),
                 }
             )
 
-    # TODO: refactor
     def image(self):
         """
         Create an image by getting an image form the setting webcam-snapshot.
@@ -767,9 +647,9 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
             # https://www.blog.pythonlibrary.org/2017/10/05/how-to-rotate-mirror-photos-with-python/
             image_obj = Image.open(BytesIO(image))
             if hflip:
-                image_obj = image_obj.transpose(Image.FLIP_LEFT_RIGHT)
+                image_obj = image_obj.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             if vflip:
-                image_obj = image_obj.transpose(Image.FLIP_TOP_BOTTOM)
+                image_obj = image_obj.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
             if rotate:
                 image_obj = image_obj.rotate(90)
             # https://stackoverflow.com/questions/646286/python-pil-how-to-write-png-image-to-string/5504072
@@ -780,7 +660,6 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
 
         return image
 
-    # TODO: refactor
     def restart_timer(self):
         if self.timer:
             self.timer.cancel()
@@ -793,7 +672,6 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
             self.timer.start()
 
     def temp_check(self):
-
         if not self.has_own_token():
             return
 
@@ -831,15 +709,10 @@ class PushoverPlugin(  # pylint: disable=too-many-ancestors
                     }
                 )
 
-    def get_mins_since_started(self):
-        if self.start_time:
-            return int(
-                round(
-                    (datetime.datetime.now() - self.start_time).total_seconds() / 60, 0
-                )
-            )
 
-
+#
+# Plugin details
+#
 
 __plugin_name__ = "Pushover"
 
