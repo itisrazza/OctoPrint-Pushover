@@ -22,7 +22,7 @@ jobs:
       run: pylint $(git ls-files '*.py')
     - name: Type Checking (mypy)
       if: success() || failure()
-      run: mypy $(git ls-files '*.p')
+      run: mypy $(git ls-files '*.py')
     - name: Code Formatting (black)
       if: success() || failure()
       run: black --check $(git ls-files '*.py')
