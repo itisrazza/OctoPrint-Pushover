@@ -4,7 +4,7 @@ Interact with the Pushover service.
 
 from datetime import datetime
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 from enum import IntEnum
 
 from requests import RequestException, get, post, Response
@@ -163,8 +163,8 @@ class Pushover:
         """
         # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
 
-        files: Optional[dict[str, bytes]] = None
-        data: dict[str, Any] = self._request_body({"message": message})
+        files: Optional[Dict[str, bytes]] = None
+        data: Dict[str, Any] = self._request_body({"message": message})
 
         if title is not None:
             data["title"] = title
@@ -218,7 +218,7 @@ class Pushover:
         except (JSONDecodeError, KeyError) as e:
             raise PushoverError.parse_fail(response) from e
 
-    def get_sounds(self) -> dict[str, str]:
+    def get_sounds(self) -> Dict[str, str]:
         """
         Return a list of sounds available to this application.
         """
@@ -226,7 +226,7 @@ class Pushover:
         try:
             response = get(
                 f"{self.BASE_URL}/sounds.json",
-                {"token", self.token},
+                [("token", self.token)],
                 timeout=self.timeout,
             )
         except RequestException as e:
@@ -240,7 +240,7 @@ class Pushover:
         except (JSONDecodeError, KeyError) as e:
             raise PushoverError.parse_fail(response) from e
 
-    def _request_body(self, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def _request_body(self, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         data = dict(data) if data is not None else {}
         data["token"] = self.token
         data["user"] = self.user
