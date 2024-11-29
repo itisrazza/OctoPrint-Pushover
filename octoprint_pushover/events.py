@@ -12,7 +12,7 @@ from .print_state import PrintState
 from .pushover import Pushover, Priority
 
 if TYPE_CHECKING:
-    from . import PushoverPlugin
+    from .plugin import PushoverPlugin
 
 
 class EventHandlers:

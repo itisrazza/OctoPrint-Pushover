@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from datetime import datetime
 
 if TYPE_CHECKING:
-    from . import PushoverPlugin
+    from .plugin import PushoverPlugin
 
 
 class PrintState:
